@@ -23,16 +23,7 @@ Before getting started, make sure you have a development workspace where you hav
 1. In the terminal run `slack app link`.
 2. Copy your App ID from the app you just created.
 3. Select `Local` when prompted.
-4. Open [`.slack/hooks.json`](./.slack/hooks.json) and add a `start` hook:
-```json
-{
-  "hooks": {
-    "get-hooks": "npx -q --no-install -p @slack/cli-hooks slack-cli-get-hooks",
-    "start": "pnpm dev"
-  }
-}
-```
-5. Open [`.slack/config.json`](./.slack/config.json) and update your manifest source to `local`:
+4. Open [`.slack/config.json`](./.slack/config.json) and update your manifest source to `local`:
 ```json
 {
   "manifest": {
@@ -41,9 +32,9 @@ Before getting started, make sure you have a development workspace where you hav
   "project_id": "<project-id-added-by-slack-cli>"
 }
 ```
-6. Start your local server with automatic tunneling using `pnpm dev:tunnel`. You can also use `slack run` if you do not want automatic tunneling and manifest updates. If prompted, select the workspace you'd like to grant access to. Select `yes` when asked "Update app settings with changes to the local manifest?".
+5. Start your local server with automatic tunneling using `pnpm dev:tunnel`. You can also use `slack run` if you do not want automatic tunneling and manifest updates. If prompted, select the workspace you'd like to grant access to. Select `yes` when asked "Update app settings with changes to the local manifest?".
 
-7. Open your Slack workspace, add your Slackbot to a channel, and send `hi`. The bot should reply with `hi, how are you?`.
+6. Open your Slack workspace, add your Slackbot to a channel, and send `hi`. The bot should reply with `hi, how are you?`.
 
 ## Project Structure
 
