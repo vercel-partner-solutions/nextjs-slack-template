@@ -55,14 +55,8 @@ Every incoming request is routed to a "listener". Inside this directory, we grou
 
 This file defines your Next.js Route Handler that receives Slack events. Its pathname matches the URLs defined in your [`manifest.json`](./manifest.json). Next.js uses file-based routing for API handlers. Learn more in the Next.js docs: https://nextjs.org/docs/app/building-your-application/routing/route-handlers
 
-## Scripts
-
-- `pnpm dev`: Start Next.js in dev mode (Turbopack).
-- `pnpm dev:tunnel`: Start dev with Slack CLI tunnel integration.
-- `pnpm build`: Build the app (Turbopack).
-- `pnpm start`: Start the Next.js server.
+## Custom Scripts
+- `pnpm dev:tunnel`: A helper script to automatically start your Slack app with ngrok tunneling.
 
 ## Notes
-
-- Turbopack requires `turbopack.root` to be an absolute path. This example derives it at runtime in `next.config.ts`.
 - If you see a warning about `express` being externalized: `@slack/bolt` ships an Express receiver. Turbopack may analyze its static import even if you don't use it. Keeping `express` as a dependency or aliasing it to a stub resolves this during development.
