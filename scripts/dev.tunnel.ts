@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import ngrok from "@ngrok/ngrok";
 import dotenv from "dotenv";
@@ -8,6 +7,7 @@ dotenv.config({ path: ".env.local", quiet: true });
 
 const DEFAULT_PORT = 3000;
 const MANIFEST_PATH = "manifest.json";
+const MANIFEST_CONFIG_PATH = ".slack/config.json";
 const TEMP_MANIFEST_PATH = ".slack/cache/manifest.temp.json";
 const SLACK_EVENTS_PATH = "/api/slack/events";
 
@@ -17,9 +17,9 @@ if (!authtoken) {
 	throw new Error("NGROK_AUTH_TOKEN is not set");
 }
 
-const getDevPort = (): number => {
+const getDevPort = async (): Promise<number> => {
 	let port = DEFAULT_PORT;
-	
+
 	// Check environment variable first
 	if (process.env.PORT) {
 		const envPort = parseInt(process.env.PORT, 10);
@@ -30,7 +30,7 @@ const getDevPort = (): number => {
 
 	// Check package.json dev script for --port flag
 	try {
-		const packageJson = JSON.parse(readFileSync("package.json", "utf-8"));
+		const packageJson = JSON.parse(await fs.readFile("package.json", "utf-8"));
 		const devScript = packageJson.scripts?.dev;
 		if (devScript) {
 			const portMatch = devScript.match(/--port\s+(\d+)/);
@@ -48,10 +48,15 @@ const getDevPort = (): number => {
 	return port;
 };
 
+const isManifestConfigLocal = async (): Promise<boolean> => {
+	const manifest = JSON.parse(await fs.readFile(MANIFEST_CONFIG_PATH, "utf-8"));
+	return manifest.manifest.source === "local";
+};
+
 const startNgrok = async (): Promise<ngrok.Listener> => {
 	return await ngrok.connect({
 		authtoken,
-		addr: getDevPort(),
+		addr: await getDevPort(),
 	});
 };
 
@@ -59,7 +64,9 @@ const backupManifest = async (manifestContent: string): Promise<void> => {
 	try {
 		await fs.writeFile(TEMP_MANIFEST_PATH, manifestContent);
 	} catch (error) {
-		throw new Error(`Failed to backup manifest: ${error instanceof Error ? error.message : String(error)}`);
+		throw new Error(
+			`Failed to backup manifest: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
 };
 
@@ -76,7 +83,9 @@ const restoreManifest = async (): Promise<void> => {
 		const manifest = await fs.readFile(TEMP_MANIFEST_PATH, "utf-8");
 		await fs.writeFile(MANIFEST_PATH, manifest);
 	} catch (error) {
-		throw new Error(`Failed to restore manifest: ${error instanceof Error ? error.message : String(error)}`);
+		throw new Error(
+			`Failed to restore manifest: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
 };
 
@@ -101,7 +110,9 @@ const updateManifestUrls = (manifest: SlackManifest, newUrl: string): void => {
 	manifest.settings.interactivity.request_url = newUrl;
 };
 
-const updateManifest = async (url: string | null): Promise<ManifestUpdateResult> => {
+const updateManifest = async (
+	url: string | null,
+): Promise<ManifestUpdateResult> => {
 	if (!url) return { updated: false, originalContent: "" };
 
 	try {
@@ -121,7 +132,9 @@ const updateManifest = async (url: string | null): Promise<ManifestUpdateResult>
 		await fs.writeFile(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
 		return { updated: true, originalContent: file };
 	} catch (error) {
-		throw new Error(`Failed to update manifest: ${error instanceof Error ? error.message : String(error)}`);
+		throw new Error(
+			`Failed to update manifest: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
 };
 
@@ -168,7 +181,12 @@ const main = async () => {
 			await backupManifest(originalContent);
 		}
 
+		console.log(
+			"\x1b[90m%s\x1b[0m",
+			`✨ Manifest is set to local in .slack/config.json. Webhook events will be sent to your local tunnel URL: ${client.url()}/api/slack/events`
+		);
 		const devProcess = runDevCommand();
+
 
 		// Keep the script running while pnpm dev is active
 		await new Promise<void>((resolve) => {
@@ -189,4 +207,26 @@ const main = async () => {
 	}
 };
 
-main();
+(async () => {
+	if (await isManifestConfigLocal()) {
+		main();
+	} else {
+		// ANSI escape codes for yellow and italic
+		console.warn(
+			"\x1b[33m\x1b[3m%s\x1b[0m",
+			"⚠  Manifest is set to remote in .slack/config.json. Webhook events will not be sent to your local server.",
+		);
+		const devProcess = spawn("pnpm", ["dev"], { stdio: "inherit" });
+
+		// Gracefully handle SIGINT/SIGTERM to avoid error log on ctrl+c
+		const handleExit = () => {
+			if (devProcess) {
+				devProcess.kill("SIGINT");
+			}
+			process.exit(0);
+		};
+
+		process.on("SIGINT", handleExit);
+		process.on("SIGTERM", handleExit);
+	}
+})();
