@@ -13,10 +13,6 @@ const SLACK_EVENTS_PATH = "/api/slack/events";
 
 const authtoken = process.env.NGROK_AUTH_TOKEN;
 
-if (!authtoken) {
-  throw new Error("NGROK_AUTH_TOKEN is not set");
-}
-
 const getDevPort = async (): Promise<number> => {
   let port = DEFAULT_PORT;
 
