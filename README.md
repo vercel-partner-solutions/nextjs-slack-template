@@ -38,6 +38,20 @@ Before getting started, make sure you have a development workspace where you hav
 
 6. Open your Slack workspace, add your Slackbot to a channel, and send `hello`. Your app should reply with `world!`.
 
+## Deploy to Vercel
+
+1. Create a new Slack app for production following the steps from above
+2. Create a new Vercel project [here](https://vercel.com/new) and select this repo
+2. Copy the Bot User OAuth Token into your Vercel environment variables as `SLACK_BOT_TOKEN`
+3. On the Basic Information tab, copy your Signing Secret into your Vercel environment variables as `SLACK_SIGNING_SECRET`
+4. When your deployment has finished, open your App Manifest from the Slack App Dashboard
+5. Update the manifest so all the `request_url` and `url` fields use `https://<your-app-domain>/api/slack/events`
+6. Click save and you will be prompted to verify the URL
+7. Open your Slack workspace and add your app to any channel
+    - _Note_: Make sure you add the production app, not the local app we setup earlier
+8. Send `hello` and your app will respond with `world!`
+
+
 ## Project Structure
 
 ### [`manifest.json`](./manifest.json)
