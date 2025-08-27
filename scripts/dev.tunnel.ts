@@ -202,26 +202,39 @@ const main = async () => {
   }
 };
 
+const runDevWithExit = () => {
+  const devProcess = spawn("pnpm", ["dev"], { stdio: "inherit" });
+
+  const handleExit = () => {
+    if (devProcess) {
+      devProcess.kill("SIGINT");
+    }
+    process.exit(0);
+  };
+
+  process.on("SIGINT", handleExit);
+  process.on("SIGTERM", handleExit);
+};
+
 (async () => {
-  if (await isManifestConfigLocal()) {
+  const manifestIsLocal = await isManifestConfigLocal();
+
+  if (manifestIsLocal && authtoken) {
+    // Token and manifest is local - proceed as normal
     main();
+  } else if (manifestIsLocal && !authtoken) {
+    // No token but manifest is local - dev has messed up, don't do local and warn them
+    console.warn(
+      "\x1b[33m\x1b[3m%s\x1b[0m",
+      "⚠  Manifest is set to local in .slack/config.json but NGROK_AUTH_TOKEN is missing. Webhook events will not be sent to your local server.",
+    );
+    runDevWithExit();
   } else {
-    // ANSI escape codes for yellow and italic
+    // Manifest isn't local - warn it isn't
     console.warn(
       "\x1b[33m\x1b[3m%s\x1b[0m",
       "⚠  Manifest is set to remote in .slack/config.json. Webhook events will not be sent to your local server.",
     );
-    const devProcess = spawn("pnpm", ["dev"], { stdio: "inherit" });
-
-    // Gracefully handle SIGINT/SIGTERM to avoid error log on ctrl+c
-    const handleExit = () => {
-      if (devProcess) {
-        devProcess.kill("SIGINT");
-      }
-      process.exit(0);
-    };
-
-    process.on("SIGINT", handleExit);
-    process.on("SIGTERM", handleExit);
+    runDevWithExit();
   }
 })();
