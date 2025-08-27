@@ -1,22 +1,23 @@
-# Slack Bolt with Next.js Template App
+# Slack Bolt with Next.js Template
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new)
 
-This is a generic Bolt for JavaScript (TypeScript) template app used to build Slack apps on Next.js (App Router + Route Handlers).
+This is a generic Bolt for JavaScript (TypeScript) template app used to build Slack apps with Next.js
 
-Before getting started, make sure you have a development workspace where you have permissions to install apps. You can [create one here](https://slack.com/create) or use a [developer sandbox](https://api.slack.com/developer-program).
+Before getting started, make sure you have a development workspace where you have permissions to install apps. You can use a [developer sandbox](https://api.slack.com/developer-program) or [create a workspace](https://slack.com/create)
 
 ## Installation
 
 #### Create a Slack App
 
-1. Open https://api.slack.com/apps/new and choose "From an app manifest".
-2. Choose the workspace you want to install the application to.
-3. Copy the contents of [`manifest.json`](./manifest.json) into the text box that says "Paste your manifest code here" (JSON tab) and click Next.
-4. Review the configuration and click Create.
-5. Open the Install App tab on the left menu. Click Install to <Workspace_Name> and Allow. You'll be redirected to the App Configuration dashboard.
+1. Open https://api.slack.com/apps/new and choose "From an app manifest"
+2. Choose the workspace you want to use
+3. Copy the contents of [`manifest.json`](./manifest.json) into the text box that says "Paste your manifest code here" (JSON tab) and click Next
+4. Review the configuration and click Create
+5. On the Install App tab, click Install to <Workspace_Name>. 
+      - You will be redirected to the App Configuration dashboard
 6. Copy the Bot User OAuth Token into your environment as `SLACK_BOT_TOKEN`.
-7. Open the Basic Information tab and copy your Signing Secret into your environment as `SLACK_SIGNING_SECRET`.
+7. On the Basic Information tab, copy your Signing Secret into your environment as `SLACK_SIGNING_SECRET`.
 
 #### Prepare for Local Development
 

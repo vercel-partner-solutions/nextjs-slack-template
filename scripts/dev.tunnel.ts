@@ -178,8 +178,8 @@ const main = async () => {
     }
 
     console.log(
-      "\x1b[90m%s\x1b[0m",
-      `✨ Manifest is set to local in .slack/config.json. Webhook events will be sent to your local tunnel URL: ${client.url()}/api/slack/events`,
+      "\x1b[90m✨ Manifest is set to local in .slack/config.json. Webhook events will be sent to your local tunnel URL: \x1b[36m%s\x1b[0m",
+      `${client.url()}/api/slack/events`,
     );
     const devProcess = runDevCommand();
 
