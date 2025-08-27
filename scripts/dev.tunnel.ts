@@ -6,17 +6,26 @@ import dotenv from "dotenv";
 
 dotenv.config({ path: ".env.local", quiet: true });
 
+const DEFAULT_PORT = 3000;
+const MANIFEST_PATH = "manifest.json";
+const TEMP_MANIFEST_PATH = ".slack/cache/manifest.temp.json";
+const SLACK_EVENTS_PATH = "/api/slack/events";
+
 const authtoken = process.env.NGROK_AUTH_TOKEN;
 
 if (!authtoken) {
 	throw new Error("NGROK_AUTH_TOKEN is not set");
 }
 
-const getDevPort = () => {
-	let port = 3000;
+const getDevPort = (): number => {
+	let port = DEFAULT_PORT;
+	
 	// Check environment variable first
 	if (process.env.PORT) {
-		port = parseInt(process.env.PORT, 10);
+		const envPort = parseInt(process.env.PORT, 10);
+		if (!Number.isNaN(envPort) && envPort > 0) {
+			port = envPort;
+		}
 	}
 
 	// Check package.json dev script for --port flag
@@ -26,57 +35,94 @@ const getDevPort = () => {
 		if (devScript) {
 			const portMatch = devScript.match(/--port\s+(\d+)/);
 			if (portMatch) {
-				port = parseInt(portMatch[1], 10);
+				const scriptPort = parseInt(portMatch[1], 10);
+				if (!Number.isNaN(scriptPort) && scriptPort > 0) {
+					port = scriptPort;
+				}
 			}
 		}
-	} catch { }
+	} catch {
+		// Silently ignore package.json read errors
+	}
 
 	return port;
 };
 
-const startNgrok = async () => {
+const startNgrok = async (): Promise<ngrok.Listener> => {
 	return await ngrok.connect({
 		authtoken,
 		addr: getDevPort(),
 	});
 };
 
-const backupManifest = async (manifestContent: string) => {
-	await fs.writeFile(".slack/cache/manifest.temp.json", manifestContent);
+const backupManifest = async (manifestContent: string): Promise<void> => {
+	try {
+		await fs.writeFile(TEMP_MANIFEST_PATH, manifestContent);
+	} catch (error) {
+		throw new Error(`Failed to backup manifest: ${error instanceof Error ? error.message : String(error)}`);
+	}
 };
 
-const removeTempManifest = async () => {
-	await fs.unlink(".slack/cache/manifest.temp.json");
+const removeTempManifest = async (): Promise<void> => {
+	try {
+		await fs.unlink(TEMP_MANIFEST_PATH);
+	} catch {
+		// Silently ignore if temp file doesn't exist
+	}
 };
 
-const restoreManifest = async () => {
-	const manifest = await fs.readFile(
-		".slack/cache/manifest.temp.json",
-		"utf-8",
-	);
-	await fs.writeFile("manifest.json", manifest);
+const restoreManifest = async (): Promise<void> => {
+	try {
+		const manifest = await fs.readFile(TEMP_MANIFEST_PATH, "utf-8");
+		await fs.writeFile(MANIFEST_PATH, manifest);
+	} catch (error) {
+		throw new Error(`Failed to restore manifest: ${error instanceof Error ? error.message : String(error)}`);
+	}
 };
 
-const updateManifest = async (url: string | null) => {
+interface ManifestUpdateResult {
+	updated: boolean;
+	originalContent: string;
+}
+
+interface SlackManifest {
+	features: {
+		slash_commands: Array<{ url: string }>;
+	};
+	settings: {
+		event_subscriptions: { request_url: string };
+		interactivity: { request_url: string };
+	};
+}
+
+const updateManifestUrls = (manifest: SlackManifest, newUrl: string): void => {
+	manifest.features.slash_commands[0].url = newUrl;
+	manifest.settings.event_subscriptions.request_url = newUrl;
+	manifest.settings.interactivity.request_url = newUrl;
+};
+
+const updateManifest = async (url: string | null): Promise<ManifestUpdateResult> => {
 	if (!url) return { updated: false, originalContent: "" };
 
-	const file = await fs.readFile("manifest.json", "utf-8");
-	const json = JSON.parse(file);
+	try {
+		const file = await fs.readFile(MANIFEST_PATH, "utf-8");
+		const manifest: SlackManifest = JSON.parse(file);
 
-	const newUrl = `${url}/api/slack/events`;
-	const currentUrl = json.settings.event_subscriptions.request_url;
+		const newUrl = `${url}${SLACK_EVENTS_PATH}`;
+		const currentUrl = manifest.settings.event_subscriptions.request_url;
 
-	// Skip if URL hasn't changed
-	if (currentUrl === newUrl) {
-		return { updated: false, originalContent: "" };
+		// Skip if URL hasn't changed
+		if (currentUrl === newUrl) {
+			return { updated: false, originalContent: "" };
+		}
+
+		updateManifestUrls(manifest, newUrl);
+
+		await fs.writeFile(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
+		return { updated: true, originalContent: file };
+	} catch (error) {
+		throw new Error(`Failed to update manifest: ${error instanceof Error ? error.message : String(error)}`);
 	}
-
-	json.features.slash_commands[0].url = newUrl;
-	json.settings.event_subscriptions.request_url = newUrl;
-	json.settings.interactivity.request_url = newUrl;
-
-	await fs.writeFile("manifest.json", JSON.stringify(json, null, 2));
-	return { updated: true, originalContent: file };
 };
 
 const cleanup = async (
@@ -97,7 +143,6 @@ const runDevCommand = () => {
 };
 
 const main = async () => {
-	const start = performance.now();
 	let client: ngrok.Listener | null = null;
 	let manifestWasUpdated = false;
 	let isCleaningUp = false;
@@ -123,8 +168,6 @@ const main = async () => {
 			await backupManifest(originalContent);
 		}
 
-		console.log("Ngrok tunnel running on", client.url());
-		console.log("Time taken to start ngrok tunnel:", performance.now() - start, "ms");
 		const devProcess = runDevCommand();
 
 		// Keep the script running while pnpm dev is active
