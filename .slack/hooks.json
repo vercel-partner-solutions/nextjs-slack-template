@@ -1,6 +1,7 @@
 {
-  "hooks": {
-    "get-hooks": "npx -q --no-install -p @slack/cli-hooks slack-cli-get-hooks",
-    "start": "pnpm dev"
-  }
+	"hooks": {
+		"get-hooks": "npx -q --no-install -p @slack/cli-hooks slack-cli-get-hooks",
+		"start": "pnpm dev",
+		"deploy": "vercel deploy --prod"
+	}
 }

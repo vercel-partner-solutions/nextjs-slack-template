@@ -1,391 +1,360 @@
-import { type ChildProcess, spawn } from "node:child_process";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+#!/usr/bin/env ts-node
+/**
+ * slack-local: Minimal CLI to start an ngrok tunnel, patch Slack manifest locally, run `slack run`, and clean up.
+ *
+ * Philosophy: fast defaults, almost no logs by default, no preflight checks.
+ *
+ * Flags:
+ *   --port <n>      Tunnel local port (default: 3000)
+ *   --manifest <p>  Path to manifest.json (default: ./manifest.json)
+ *   --dry-run       Print what would happen, change nothing
+ *   --persist       Do not restore manifest on exit
+ *   --json          Emit a single JSON summary line (no other logs)
+ *   --verbose       Print minimal progress messages
+ */
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { spawn } from "node:child_process";
+import * as fs from "node:fs/promises";
+import * as http from "node:http";
+import * as path from "node:path";
 
-const MANIFEST_PATH = path.join(__dirname, "..", "manifest.json");
-const CONFIG_PATH = path.join(__dirname, "..", ".slack", "config.json");
-const NGROK_PORT = Number.parseInt(
-  process.env.NGROK_PORT ?? process.env.PORT ?? "3000",
-  10,
-);
-const NGROK_STARTUP_DELAY = 3000;
-const NGROK_API_URL = "http://localhost:4040/api/tunnels";
-
-let ngrokProcess: ChildProcess | null = null;
-let slackProcess: ChildProcess | null = null;
-let isShuttingDown = false;
-let ngrokStartedByUs = false;
-
-function augmentPathForBrew(): void {
-  const pathsToEnsure: string[] = [];
-  pathsToEnsure.push("/opt/homebrew/bin");
-  pathsToEnsure.push("/usr/local/bin");
-  pathsToEnsure.push("/usr/bin", "/bin", "/usr/sbin", "/sbin");
-
-  const currentPath = process.env.PATH || "";
-  const pathSegments = new Set(currentPath.split(path.delimiter));
-  for (const p of pathsToEnsure) {
-    if (!pathSegments.has(p) && fs.existsSync(p)) {
-      pathSegments.add(p);
+// ---- tiny arg parser ----
+function parseArgs(argv: string[]) {
+  const args: Record<string, any> = {
+    port: 3000,
+    manifest: "./manifest.json",
+    dryRun: false,
+    persist: false,
+    json: false,
+    verbose: false,
+  };
+  for (let i = 2; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--dry-run") args.dryRun = true;
+    else if (a === "--persist") args.persist = true;
+    else if (a === "--json") args.json = true;
+    else if (a === "--verbose") args.verbose = true;
+    else if (a === "--port") args.port = Number(argv[++i]);
+    else if (a === "--manifest") args.manifest = argv[++i];
+    else {
+      // ignore unknowns to stay minimal
     }
   }
-  process.env.PATH = Array.from(pathSegments).join(path.delimiter);
+  return args;
 }
 
-function checkBinaryAvailable(
-  command: string,
-  args: string[] = ["--version"],
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    try {
-      const probe = spawn(command, args, { stdio: "ignore", shell: false });
-      let resolved = false;
-      probe.once("error", (err: NodeJS.ErrnoException) => {
-        if (!resolved) {
-          resolved = true;
-          if (err && err.code === "ENOENT") resolve(false);
-          else resolve(false);
-        }
-      });
-      probe.once("spawn", () => {
-        if (!resolved) {
-          resolved = true;
-          resolve(true);
-        }
-      });
-      probe.once("exit", () => {
-        if (!resolved) {
-          resolved = true;
-          resolve(true);
-        }
-      });
-    } catch {
-      resolve(false);
-    }
+// ---- logging helpers ----
+const out = (s: string) => process.stdout.write(s + "\n");
+const log = (enabled: boolean, s: string) => enabled && out(s);
+
+// ---- ngrok helpers ----
+function startNgrok(port: number, verbose: boolean) {
+  // Let ngrok fail loudly if not installed/auth'd
+  const proc = spawn("ngrok", ["http", String(port), "--log=stdout"], {
+    stdio: ["ignore", "pipe", "pipe"],
   });
-}
-
-function cleanup(): void {
-  if (isShuttingDown) return;
-  isShuttingDown = true;
-
-  console.log("\n🛑 Shutting down development environment...");
-
-  const processes = [
-    {
-      name: "ngrok tunnel",
-      process: ngrokProcess,
-      shouldKill: ngrokStartedByUs,
-    },
-    { name: "slack app", process: slackProcess, shouldKill: true },
-  ];
-
-  processes.forEach(({ name, process, shouldKill }) => {
-    if (process && shouldKill) {
-      console.log(`   Stopping ${name}...`);
-      process.kill("SIGTERM");
-    }
-  });
-
-  setTimeout(() => {
-    console.log("✅ Cleanup complete");
-    process.exit(0);
-  }, 1000);
-}
-
-process.on("SIGINT", cleanup);
-process.on("SIGTERM", cleanup);
-
-async function updateManifest(ngrokUrl: string): Promise<boolean> {
-  try {
-    console.log("📝 Updating manifest.json...");
-
-    if (!fs.existsSync(MANIFEST_PATH)) {
-      throw new Error(`Manifest file not found at ${MANIFEST_PATH}`);
-    }
-
-    const manifestContent = fs.readFileSync(MANIFEST_PATH, "utf8");
-    let manifest: any;
-
-    try {
-      manifest = JSON.parse(manifestContent);
-    } catch (parseError: any) {
-      throw new Error(`Invalid JSON in manifest file: ${parseError.message}`);
-    }
-
-    const eventsUrl = `${ngrokUrl}/api/events`;
-    let updatedCount = 0;
-
-    if (manifest.features?.slash_commands) {
-      manifest.features.slash_commands.forEach((cmd: any) => {
-        if (cmd.url !== eventsUrl) {
-          cmd.url = eventsUrl;
-          updatedCount++;
-        }
-      });
-    }
-
-    if (manifest.settings?.event_subscriptions?.request_url !== eventsUrl) {
-      if (manifest.settings?.event_subscriptions) {
-        manifest.settings.event_subscriptions.request_url = eventsUrl;
-        updatedCount++;
-      }
-    }
-
-    if (manifest.settings?.interactivity?.request_url !== eventsUrl) {
-      if (manifest.settings?.interactivity) {
-        manifest.settings.interactivity.request_url = eventsUrl;
-        updatedCount++;
-      }
-    }
-
-    fs.writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
-    console.log(`✅ Updated ${updatedCount} URL(s) in manifest.json`);
-
-    return true;
-  } catch (error: any) {
-    console.error(
-      "❌ Failed to update manifest.json:",
-      error.message ?? String(error),
-    );
-    throw error;
+  // Silence stdout unless verbose (ngrok logs are noisy)
+  if (verbose) {
+    proc.stdout.on("data", (d) => process.stderr.write(d));
+    proc.stderr.on("data", (d) => process.stderr.write(d));
   }
+  return proc;
 }
 
-async function updateConfig(): Promise<boolean> {
-  try {
-    console.log("⚙️ Updating .slack/config.json...");
-
-    if (!fs.existsSync(CONFIG_PATH)) {
-      throw new Error(`Config file not found at ${CONFIG_PATH}`);
-    }
-
-    const configContent = fs.readFileSync(CONFIG_PATH, "utf8");
-    let config: any;
-
-    try {
-      config = JSON.parse(configContent);
-    } catch (parseError: any) {
-      throw new Error(`Invalid JSON in config file: ${parseError.message}`);
-    }
-
-    if (!config.manifest) {
-      throw new Error("manifest key not found in config.json");
-    }
-    config.manifest.source = "local";
-
-    fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
-    console.log("✅ Set manifest.source to 'local' in config.json");
-
-    return true;
-  } catch (error: any) {
-    console.error(
-      "❌ Failed to update config.json:",
-      error.message ?? String(error),
-    );
-    throw error;
-  }
-}
-
-function startNgrok(): Promise<string> {
+function getTunnelUrl(timeoutMs = 10000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  const endpoint = "http://127.0.0.1:4040/api/tunnels";
   return new Promise((resolve, reject) => {
-    console.log("🔗 Starting ngrok tunnel...");
-    ngrokProcess = spawn("ngrok", ["http", NGROK_PORT.toString()], {
-      stdio: "pipe",
-      shell: false,
-    });
-
-    ngrokProcess.on("error", (error: Error) => {
-      console.error(
-        "❌ Failed to start ngrok:",
-        (error as any).message ?? String(error),
-      );
-      console.error(
-        "   Make sure ngrok is installed: https://ngrok.com/download",
-      );
-      reject(error);
-    });
-
-    const pollNgrokUrl = (attempt = 1, maxAttempts = 10) => {
-      setTimeout(
-        async () => {
-          try {
-            const res = await fetch(NGROK_API_URL);
-            if (!res.ok) {
-              throw new Error(`HTTP ${res.status}`);
+    const tryOnce = () => {
+      http
+        .get(endpoint, (res) => {
+          let data = "";
+          res.on("data", (c) => {
+            data += c;
+          });
+          res.on("end", () => {
+            try {
+              const json = JSON.parse(data);
+              const tunnels = (json.tunnels || []) as any[];
+              const https = tunnels.find(
+                (t) => t?.public_url?.startsWith("https://"),
+              );
+              if (https) return resolve(https.public_url);
+              if (Date.now() > deadline)
+                return reject(new Error("Tunnel URL not found before timeout"));
+              setTimeout(tryOnce, 250);
+            } catch (_error) {
+              if (Date.now() > deadline)
+                return reject(new Error("Failed to parse ngrok API response"));
+              setTimeout(tryOnce, 250);
             }
-            const response = (await res.json()) as any;
-            const httpsTunnel = response.tunnels?.find(
-              (t: any) => t.proto === "https",
-            );
-
-            if (httpsTunnel) {
-              const ngrokUrl = httpsTunnel.public_url as string;
-              console.log(`🌐 Ngrok tunnel ready: ${ngrokUrl}`);
-              resolve(ngrokUrl);
-            } else if (attempt < maxAttempts) {
-              console.log(
-                `   No HTTPS tunnel found yet (attempt ${attempt}/${maxAttempts})...`,
-              );
-              pollNgrokUrl(attempt + 1, maxAttempts);
-            } else {
-              const error = new Error(
-                "No HTTPS tunnel found after multiple attempts",
-              );
-              console.error("❌", error.message);
-              reject(error);
-            }
-          } catch (error) {
-            if (attempt < maxAttempts) {
-              console.log(
-                `   Waiting for ngrok to start (attempt ${attempt}/${maxAttempts})...`,
-              );
-              pollNgrokUrl(attempt + 1, maxAttempts);
-            } else {
-              console.error(
-                "❌ Failed to get ngrok URL after multiple attempts:",
-                (error as any).message ?? String(error),
-              );
-              console.error(
-                "   Make sure ngrok is running and accessible at localhost:4040",
-              );
-              reject(error);
-            }
-          }
-        },
-        attempt === 1 ? NGROK_STARTUP_DELAY : 2000,
-      );
+          });
+        })
+        .on("error", () => {
+          if (Date.now() > deadline)
+            return reject(new Error("ngrok API not reachable on :4040"));
+          setTimeout(tryOnce, 250);
+        });
     };
-
-    pollNgrokUrl();
+    tryOnce();
   });
 }
 
-async function getExistingNgrokUrl(): Promise<string | undefined> {
+// ---- manifest patching ----
+function replaceOrigin(url: string, newOrigin: string) {
   try {
-    const res = await fetch(NGROK_API_URL);
-    if (!res.ok) return undefined;
-    const response = (await res.json()) as any;
-    const httpsTunnel = response.tunnels?.find((t: any) => t.proto === "https");
-    return httpsTunnel?.public_url as string | undefined;
+    const u = new URL(url);
+    const n = new URL(newOrigin);
+    u.protocol = n.protocol;
+    u.host = n.host;
+    return u.toString();
   } catch {
-    return undefined;
+    return url; // non-URL strings untouched
   }
 }
 
-async function ensureNgrok(): Promise<string> {
-  const existingUrl = await getExistingNgrokUrl();
-  if (existingUrl) {
-    console.log(`🌐 Reusing existing ngrok tunnel: ${existingUrl}`);
-    ngrokStartedByUs = false;
-    return existingUrl;
+type JSONValue = string | number | boolean | null | JSONObject | JSONArray;
+interface JSONObject {
+  [k: string]: JSONValue;
+}
+interface JSONArray extends Array<JSONValue> { }
+
+const KNOWN_PATHS = [
+  ["settings", "event_subscriptions", "request_url"],
+  ["settings", "interactivity", "request_url"],
+  ["features", "slash_commands", "*", "url"],
+  ["oauth", "redirect_urls", "*"],
+];
+
+function get(obj: JSONValue, pathArr: (string | number)[]): any {
+  let cur: any = obj;
+  for (const key of pathArr) {
+    if (cur == null) return undefined;
+    cur = cur[key as any];
   }
-  const url = await startNgrok();
-  ngrokStartedByUs = true;
-  return url;
+  return cur;
 }
 
-async function startSlackApp(appId?: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (!appId) {
-      console.log("🚀 Starting Slack app");
-    } else {
-      console.log(`🚀 Starting Slack app ${appId}...`);
-    }
-
-    if (appId) {
-      slackProcess = spawn("slack", ["run", "-a", appId], {
-        stdio: "inherit",
-        shell: false,
-      });
-    } else {
-      slackProcess = spawn("slack", ["run"], {
-        stdio: "inherit",
-        shell: false,
-      });
-    }
-
-    slackProcess.on("error", (error: Error) => {
-      console.error(
-        "❌ Failed to start Slack app:",
-        (error as any).message ?? String(error),
-      );
-      console.error(
-        "   Make sure Slack CLI is installed: https://api.slack.com/automation/cli/install",
-      );
-      reject(error);
-    });
-
-    slackProcess.on("spawn", () => {
-      resolve();
-    });
-
-    slackProcess.on("exit", (code) => {
-      if (!isShuttingDown && code !== 0) {
-        console.error(`❌ Slack app exited unexpectedly with code ${code}`);
-      }
-    });
-  });
+function set(obj: JSONValue, pathArr: (string | number)[], value: any) {
+  let cur: any = obj;
+  for (let i = 0; i < pathArr.length - 1; i++) {
+    const k = pathArr[i];
+    if (cur[k as any] == null)
+      cur[k as any] = typeof pathArr[i + 1] === "number" ? [] : {};
+    cur = cur[k as any];
+  }
+  cur[pathArr[pathArr.length - 1] as any] = value;
 }
 
-async function start(): Promise<void> {
+function expandWildcards(
+  obj: any,
+  path: (string | number)[],
+): (string | number)[][] {
+  const idx = path.indexOf("*");
+  if (idx === -1) return [path];
+  const head = path.slice(0, idx);
+  const tail = path.slice(idx + 1);
+  const arr = get(obj, head);
+  if (!Array.isArray(arr)) return [];
+  const out: (string | number)[][] = [];
+  for (let i = 0; i < arr.length; i++) {
+    out.push([...head, i, ...tail]);
+  }
+  return out;
+}
+
+function collectTargets(manifest: JSONObject): (string | number)[][] {
+  const targets: (string | number)[][] = [];
+  for (const p of KNOWN_PATHS) {
+    const expanded = p.includes("*") ? expandWildcards(manifest, p) : [p];
+    for (const pathArr of expanded) {
+      const v = get(manifest, pathArr);
+      if (typeof v === "string" && /^https?:\/\//.test(v))
+        targets.push(pathArr);
+    }
+  }
+  return targets;
+}
+
+async function readJSON(filePath: string): Promise<JSONObject> {
+  const raw = await fs.readFile(filePath, "utf8");
+  return JSON.parse(raw);
+}
+
+async function writeJSON(filePath: string, data: JSONObject) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+}
+
+// ---- Slack config toggle (manifest source local) ----
+async function maybeToggleConfigToLocal(
+  projectRoot: string,
+): Promise<{ changed: boolean; backupPath?: string }> {
+  const cfgPath = path.join(projectRoot, "config.json");
   try {
-    augmentPathForBrew();
+    const raw = await fs.readFile(cfgPath, "utf8");
+    const cfg = JSON.parse(raw);
+    const prev = cfg?.manifest?.source;
+    if (prev === "local") return { changed: false };
+    if (!cfg.manifest) cfg.manifest = {};
+    cfg.manifest.source = "local";
+    const backup = `${cfgPath}.backup`;
+    await fs.writeFile(backup, raw, "utf8");
+    await fs.writeFile(cfgPath, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
+    return { changed: true, backupPath: backup };
+  } catch {
+    // If config.json doesn't exist or can't be parsed, ignore silently.
+    return { changed: false };
+  }
+}
 
-    const [hasSlackCli, hasNgrokBinary] = await Promise.all([
-      checkBinaryAvailable("slack", ["--version"]),
-      checkBinaryAvailable("ngrok", ["version"]),
-    ]);
+async function restoreFile(backupPath?: string, targetPath?: string) {
+  if (!backupPath || !targetPath) return;
+  try {
+    const raw = await fs.readFile(backupPath);
+    await fs.writeFile(targetPath, raw);
+    await fs.unlink(backupPath).catch(() => { });
+  } catch {
+    // ignore
+  }
+}
 
-    if (!hasSlackCli) {
-      throw new Error(
-        "Slack CLI not found in PATH. Install: https://api.slack.com/automation/cli/install",
-      );
+// ---- main ----
+(async function main() {
+  const args = parseArgs(process.argv);
+  const projectRoot = process.cwd();
+  const manifestPath = path.resolve(projectRoot, args.manifest);
+  const tempDir = path.join(projectRoot, ".slackdev");
+  const tempManifestPath = manifestPath; // inline edit for local-manifest mode (with backup)
+  const manifestBackupPath = `${manifestPath}.backup`;
+
+  let ngrokProc: ReturnType<typeof startNgrok> | null = null;
+  let cfgBackupPath: string | undefined;
+  let cfgChanged = false;
+  const patchedKeys: string[] = [];
+  let tunnelUrl = "";
+
+  const cleanup = async () => {
+    if (args.persist) return; // keep current state
+    // restore manifest
+    await restoreFile(manifestBackupPath, manifestPath);
+    // restore config.json if toggled
+    if (cfgChanged)
+      await restoreFile(cfgBackupPath, path.join(projectRoot, "config.json"));
+    // stop ngrok
+    if (ngrokProc && !ngrokProc.killed) {
+      try {
+        ngrokProc.kill("SIGTERM");
+      } catch { }
+    }
+  };
+
+  process.on("SIGINT", async () => {
+    await cleanup();
+    process.exit(130);
+  });
+  process.on("SIGTERM", async () => {
+    await cleanup();
+    process.exit(143);
+  });
+  process.on("exit", async () => {
+    await cleanup();
+  });
+
+  try {
+    // Toggle Slack CLI to use local manifest if applicable
+    const toggled = await maybeToggleConfigToLocal(projectRoot);
+    cfgChanged = toggled.changed;
+    cfgBackupPath = toggled.backupPath;
+
+    // Read and (maybe) patch manifest
+    const manifest = await readJSON(manifestPath);
+
+    // Start ngrok unless dry-run
+    if (!args.dryRun) {
+      log(args.verbose, `Starting ngrok on port ${args.port}…`);
+      ngrokProc = startNgrok(args.port, args.verbose);
+      tunnelUrl = await getTunnelUrl();
+    } else {
+      tunnelUrl = "https://example-tunnel.ngrok-free.app"; // placeholder for dry-run
     }
 
-    if (!hasNgrokBinary) {
-      console.warn(
-        "⚠️ ngrok binary not found in PATH. If an ngrok daemon is already running at localhost:4040, we'll reuse it.",
-      );
-    }
-
-    const ngrokUrl = await ensureNgrok();
-
-    await updateManifest(ngrokUrl);
-
-    await updateConfig();
-
-    const appId = (() => {
-      if (process.env.SLACK_APP_ID) return process.env.SLACK_APP_ID;
-      const devPath = path.join(__dirname, "..", ".slack", "apps.dev.json");
-      const prodPath = path.join(__dirname, "..", ".slack", "apps.json");
-      for (const p of [devPath, prodPath]) {
-        if (fs.existsSync(p)) {
-          try {
-            const apps = JSON.parse(fs.readFileSync(p, "utf8"));
-            const firstKey = Object.keys(apps)[0];
-            return firstKey
-              ? (apps[firstKey]?.app_id as string | undefined)
-              : undefined;
-          } catch { }
+    // Collect targets and patch
+    const targets = collectTargets(manifest);
+    for (const p of targets) {
+      const current = get(manifest, p);
+      if (typeof current === "string") {
+        const updated = replaceOrigin(current, tunnelUrl);
+        if (updated !== current) {
+          set(manifest, p, updated);
+          patchedKeys.push(p.map(String).join("."));
         }
       }
-      return undefined;
-    })();
+    }
 
-    await startSlackApp(appId);
-  } catch (error: any) {
-    console.error(
-      "\n❌ Failed to start development environment:",
-      error.message ?? String(error),
-    );
-    cleanup();
-    process.exit(1);
+    if (args.dryRun) {
+      if (args.json) {
+        out(
+          JSON.stringify({
+            tunnelUrl,
+            port: args.port,
+            manifestPath,
+            patchedKeys,
+          }),
+        );
+      } else {
+        out(`Would use tunnel: ${tunnelUrl}`);
+        out(`Would patch ${patchedKeys.length} field(s)`);
+        if (args.verbose) {
+          patchedKeys.forEach((k) => { out(`- ${k}`); });
+        }
+        out(`Would run: slack run`);
+      }
+      return;
+    }
+
+    // Backup + write manifest
+    try {
+      const raw = await fs.readFile(manifestPath);
+      await fs.mkdir(tempDir, { recursive: true });
+      await fs.writeFile(manifestBackupPath, raw);
+    } catch { }
+    await writeJSON(tempManifestPath, manifest);
+
+    if (args.json) {
+      out(
+        JSON.stringify({
+          tunnelUrl,
+          port: args.port,
+          manifestPath: tempManifestPath,
+          patchedKeys,
+        }),
+      );
+    } else if (args.verbose) {
+      out(`tunnel: ${tunnelUrl}`);
+      out(`patched: ${patchedKeys.length}`);
+    } else {
+      // Bare-minimum: single-line summary
+      out(`${tunnelUrl}`);
+    }
+
+    // Run slack
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn("slack", ["run"], { stdio: "inherit" });
+      proc.on("exit", (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`slack run exited with code ${code}`));
+      });
+      proc.on("error", reject);
+    });
+  } catch (err: any) {
+    if (args.json) {
+      out(JSON.stringify({ error: err?.message || String(err) }));
+    } else {
+      out(err?.message || String(err));
+    }
+    process.exitCode = 1;
+  } finally {
+    await cleanup();
   }
-}
-
-start();
+})();

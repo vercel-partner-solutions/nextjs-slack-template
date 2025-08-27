@@ -1,8 +1,7 @@
-import pkg from '@slack/bolt';
+import { App } from '@slack/bolt';
 import { VercelReceiver } from '@vercel/slack-bolt';
 import registerListeners from './listeners';
 
-const { App } = pkg;
 const receiver = new VercelReceiver();
 
 const app = new App({
