@@ -36,7 +36,7 @@ Before getting started, make sure you have a development workspace where you hav
 5. Start your local server using `slack run`. If prompted, select the workspace you'd like to grant access to. 
 - Select `yes` if asked "Update app settings with changes to the local manifest?".
 
-6. Open your Slack workspace, add your Slackbot to a channel, and send `hi`. The bot should reply with `hi, how are you?`.
+6. Open your Slack workspace, add your Slackbot to a channel, and send `hello`. Your app should reply with `world!`.
 
 ## Project Structure
 
