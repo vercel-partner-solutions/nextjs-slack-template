@@ -97,6 +97,7 @@ const runDevCommand = () => {
 };
 
 const main = async () => {
+	const start = performance.now();
 	let client: ngrok.Listener | null = null;
 	let manifestWasUpdated = false;
 	let isCleaningUp = false;
@@ -122,6 +123,8 @@ const main = async () => {
 			await backupManifest(originalContent);
 		}
 
+		console.log("Ngrok tunnel running on", client.url());
+		console.log("Time taken to start ngrok tunnel:", performance.now() - start, "ms");
 		const devProcess = runDevCommand();
 
 		// Keep the script running while pnpm dev is active
