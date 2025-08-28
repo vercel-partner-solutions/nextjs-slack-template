@@ -16,14 +16,14 @@ Before getting started, make sure you have a development workspace where you hav
 4. Review the configuration and click Create
 5. On the Install App tab, click Install to <Workspace_Name>. 
       - You will be redirected to the App Configuration dashboard
-6. Copy the Bot User OAuth Token into your environment as `SLACK_BOT_TOKEN`.
-7. On the Basic Information tab, copy your Signing Secret into your environment as `SLACK_SIGNING_SECRET`.
+6. Copy the Bot User OAuth Token into your environment as `SLACK_BOT_TOKEN`
+7. On the Basic Information tab, copy your Signing Secret into your environment as `SLACK_SIGNING_SECRET`
 
 #### Prepare for Local Development
 
-1. In the terminal run `slack app link`.
-2. Copy your App ID from the app you just created.
-3. Select `Local` when prompted.
+1. In the terminal run `slack app link`
+2. Copy your App ID from the app you just created
+3. Select `Local` when prompted
 4. Open [`.slack/config.json`](./.slack/config.json) and update your manifest source to `local`:
 ```json
 {
@@ -33,10 +33,10 @@ Before getting started, make sure you have a development workspace where you hav
   "project_id": "<project-id-added-by-slack-cli>"
 }
 ```
-5. Start your local server using `slack run`. If prompted, select the workspace you'd like to grant access to. 
-- Select `yes` if asked "Update app settings with changes to the local manifest?".
+5. Start your local server using `slack run`. If prompted, select the workspace you'd like to grant access to 
+- Select `yes` if asked "Update app settings with changes to the local manifest?"
 
-6. Open your Slack workspace, add your Slackbot to a channel, and send `hello`. Your app should reply with `world!`.
+6. Open your Slack workspace, add your Slackbot to a channel, and send `hello`. Your app should reply with `world!`
 
 ## Deploy to Vercel
 
@@ -57,22 +57,22 @@ Before getting started, make sure you have a development workspace where you hav
 
 ### [`manifest.json`](./manifest.json)
 
-[`manifest.json`](./manifest.json) defines your Slack app's configuration. With a manifest, you can create or update an app with a pre-defined configuration.
+[`manifest.json`](./manifest.json) defines your Slack app's configuration. With a manifest, you can create or update an app with a pre-defined configuration
 
 ### [`src/bolt/app.ts`](./src/bolt/app.ts)
 
-This is the Bolt app entry. It initializes `@vercel/slack-bolt`'s `VercelReceiver` and registers listeners.
+This is the Bolt app entry. It initializes `@vercel/slack-bolt`'s `VercelReceiver` and registers listeners
 
 ### [`src/bolt/listeners`](./src/bolt/listeners)
 
-Every incoming request is routed to a "listener". Inside this directory, we group each listener by Slack Platform feature, e.g. [`messages`](./src/bolt/listeners/messages) for message events.
+Every incoming request is routed to a "listener". Inside this directory, we group each listener by Slack Platform feature, e.g. [`messages`](./src/bolt/listeners/messages) for message events
 
 ### Route Handler: [`src/app/api/events/route.ts`](./src/app/api/events/route.ts)
 
 This file defines your Next.js Route Handler that receives Slack events. Its pathname matches the URLs defined in your [`manifest.json`](./manifest.json). Next.js uses file-based routing for API handlers. Learn more in the Next.js docs: https://nextjs.org/docs/app/building-your-application/routing/route-handlers
 
 ## Custom Scripts
-- `pnpm dev:tunnel`: A helper script to automatically start your Slack app with ngrok tunneling.
+- `pnpm dev:tunnel`: A helper script to automatically start your Slack app with ngrok tunneling
 
 ## Notes
 - If you see a warning about `express` being externalized: `@slack/bolt` ships an Express receiver. Turbopack may analyze its static import even if you don't use it. Keeping `express` as a dependency or aliasing it to a stub resolves this during development.
