@@ -50,6 +50,7 @@ Before getting started, make sure you have a development workspace where you hav
 7. Open your Slack workspace and add your app to any channel
     - _Note_: Make sure you add the production app, not the local app we setup earlier
 8. Send `hello` and your app will respond with `world!`
+9. Your app will now automatically build and deploy whenever you commit to your repo. More information [here](https://vercel.com/docs/git)
 
 
 ## Project Structure
