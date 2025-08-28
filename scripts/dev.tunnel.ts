@@ -46,7 +46,7 @@ const getDevPort = async (): Promise<number> => {
 
 const isManifestConfigLocal = async (): Promise<boolean> => {
   const manifest = JSON.parse(await fs.readFile(MANIFEST_CONFIG_PATH, "utf-8"));
-  return manifest.manifest.source === "local";
+  return manifest?.manifest?.source === "local";
 };
 
 const startNgrok = async (): Promise<ngrok.Listener> => {
@@ -203,7 +203,7 @@ const main = async () => {
 };
 
 const runDevWithExit = () => {
-  const devProcess = spawn("pnpm", ["dev"], { stdio: "inherit" });
+  const devProcess = runDevCommand();
 
   const handleExit = () => {
     if (devProcess) {
