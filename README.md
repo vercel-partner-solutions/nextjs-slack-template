@@ -8,7 +8,7 @@ Before getting started, make sure you have a development workspace where you hav
 
 ## Installation
 
-#### Create a Slack App
+### Create a Slack App
 
 1. Open https://api.slack.com/apps/new and choose "From an app manifest"
 2. Choose the workspace you want to use
@@ -19,12 +19,15 @@ Before getting started, make sure you have a development workspace where you hav
 6. Copy the Bot User OAuth Token into your environment as `SLACK_BOT_TOKEN`
 7. On the Basic Information tab, copy your Signing Secret into your environment as `SLACK_SIGNING_SECRET`
 
-#### Prepare for Local Development
+### Prepare for Local Development
 
-1. In the terminal run `slack app link`
-2. Copy your App ID from the app you just created
-3. Select `Local` when prompted
-4. Open [`.slack/config.json`](./.slack/config.json) and update your manifest source to `local`:
+1. Add your `NGROK_AUTH_TOKEN` to your `.env` file
+    - You can get a free token [here](https://dashboard.ngrok.com/login?state=X1FFBj9sgtS9-oFK_2-h15Xcg0zHPjp_b9edWYrpGBVvIluUPEAarKRIjpp8ZeCHNTljTyreeslpG6n8anuSCFUkgIxwLypEGOa4Ci_cmnXYLhOfYogHWB6TzWBYUmhFLPW0XeGn789mFV_muomVd7QizkgwuYW8Vz2wW315YIK5UPywQaIGFKV8)
+2. In the terminal run `slack app link`
+3. If prompted `update the manifest source to remote` select `yes`
+4. Copy your App ID from the app you just created
+5. Select `Local` when prompted
+6. Open [`.slack/config.json`](./.slack/config.json) and update your manifest source to `local`
 ```json
 {
   "manifest": {
@@ -33,10 +36,9 @@ Before getting started, make sure you have a development workspace where you hav
   "project_id": "<project-id-added-by-slack-cli>"
 }
 ```
-5. Start your local server using `slack run`. If prompted, select the workspace you'd like to grant access to 
+7. Start your local server using `slack run`. If prompted, select the workspace you'd like to grant access to 
 - Select `yes` if asked "Update app settings with changes to the local manifest?"
-
-6. Open your Slack workspace, add your Slackbot to a channel, and send `hello`. Your app should reply with `world!`
+8. Open your Slack workspace, add your Slackbot to a channel, and send `hello`. Your app should reply with `world!`
 
 ## Deploy to Vercel
 
