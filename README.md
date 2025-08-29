@@ -74,7 +74,7 @@ This is the Bolt app entry. It initializes `@vercel/slack-bolt`'s `VercelReceive
 
 Every incoming request is routed to a "listener". Inside this directory, we group each listener by Slack Platform feature, e.g. [`messages`](./src/bolt/listeners/messages) for message events
 
-### Route Handler: [`src/app/api/events/route.ts`](./src/app/api/events/route.ts)
+### Route Handler: [`src/app/api/slack/events/route.ts`](./src/app/api/slack/events/route.ts)
 
 This file defines your Next.js Route Handler that receives Slack events. Its pathname matches the URLs defined in your [`manifest.json`](./manifest.json). Next.js uses file-based routing for API handlers. Learn more in the Next.js docs: https://nextjs.org/docs/app/building-your-application/routing/route-handlers
 
