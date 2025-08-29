@@ -1,5 +1,5 @@
 {
-	"name": "slack-bolt-with-nextjs",
+	"name": "slack-bolt-with-next",
 	"version": "0.1.0",
 	"private": true,
 	"scripts": {
